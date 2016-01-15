@@ -1,6 +1,5 @@
 from django.core.urlresolvers import reverse
 from django.test import TestCase
-from django.contrib.auth import get_user_model
 from django.core import mail
 from django.conf import settings
 from django.test.utils import override_settings
@@ -26,16 +25,6 @@ class APITestCase1(TestCase, BaseAPITestCase):
     NEW_PASS = 'new-test-pass'
     REGISTRATION_VIEW = 'rest_auth.runtests.RegistrationView'
 
-    # data without user profile
-    REGISTRATION_DATA = {
-        "username": USERNAME,
-        "password1": PASS,
-        "password2": PASS
-    }
-
-    REGISTRATION_DATA_WITH_EMAIL = REGISTRATION_DATA.copy()
-    REGISTRATION_DATA_WITH_EMAIL['email'] = EMAIL
-
     BASIC_USER_DATA = {
         'first_name': "John",
         'last_name': 'Smith',
@@ -59,7 +48,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
 
     def test_login(self):
         payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
         # there is no users in db so it should throw error (400)
@@ -68,7 +57,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.post(self.password_change_url, status_code=403)
 
         # create user
-        user = get_user_model().objects.create_user(self.USERNAME, '', self.PASS)
+        user = self._generate_user()
 
         self.post(self.login_url, data=payload, status_code=200)
         self.assertEqual('key' in self.response.json.keys(), True)
@@ -105,7 +94,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.post(self.password_change_url, status_code=403)
 
         # create user
-        user = get_user_model().objects.create_user(self.USERNAME, self.EMAIL, self.PASS)
+        user = self._generate_user()
 
         # test auth by email
         self.post(self.login_url, data=payload, status_code=200)
@@ -138,10 +127,10 @@ class APITestCase1(TestCase, BaseAPITestCase):
 
     def test_password_change(self):
         login_payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
-        get_user_model().objects.create_user(self.USERNAME, '', self.PASS)
+        self._generate_user()
         self.post(self.login_url, data=login_payload, status_code=200)
         self.token = self.response.json['key']
 
@@ -179,10 +168,10 @@ class APITestCase1(TestCase, BaseAPITestCase):
     @override_settings(OLD_PASSWORD_FIELD_ENABLED=True)
     def test_password_change_with_old_password(self):
         login_payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
-        get_user_model().objects.create_user(self.USERNAME, '', self.PASS)
+        self._generate_user()
         self.post(self.login_url, data=login_payload, status_code=200)
         self.token = self.response.json['key']
 
@@ -216,7 +205,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.post(self.login_url, data=login_payload, status_code=200)
 
     def test_password_reset(self):
-        user = get_user_model().objects.create_user(self.USERNAME, self.EMAIL, self.PASS)
+        user = self._generate_user()
 
         # call password reset
         mail_count = len(mail.outbox)
@@ -265,13 +254,13 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.post(url, data=data, status_code=200)
 
         payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.NEW_PASS
         }
         self.post(self.login_url, data=payload, status_code=200)
 
     def test_password_reset_with_email_in_different_case(self):
-        get_user_model().objects.create_user(self.USERNAME, self.EMAIL.lower(), self.PASS)
+        self._generate_user(email=self.EMAIL.lower())
 
         # call password reset in upper case
         mail_count = len(mail.outbox)
@@ -283,7 +272,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
         """
         Invalid email should not raise error, as this would leak users
         """
-        get_user_model().objects.create_user(self.USERNAME, self.EMAIL, self.PASS)
+        self._generate_user()
 
         # call password reset
         mail_count = len(mail.outbox)
@@ -292,9 +281,9 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.assertEqual(len(mail.outbox), mail_count)
 
     def test_user_details(self):
-        user = get_user_model().objects.create_user(self.USERNAME, self.EMAIL, self.PASS)
+        user = self._generate_user()
         payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
         self.post(self.login_url, data=payload, status_code=200)
@@ -302,29 +291,32 @@ class APITestCase1(TestCase, BaseAPITestCase):
         self.get(self.user_url, status_code=200)
 
         self.patch(self.user_url, data=self.BASIC_USER_DATA, status_code=200)
-        user = get_user_model().objects.get(pk=user.pk)
+        user = self.USER_MODEL.objects.get(pk=user.pk)
         self.assertEqual(user.first_name, self.response.json['first_name'])
         self.assertEqual(user.last_name, self.response.json['last_name'])
         self.assertEqual(user.email, self.response.json['email'])
 
     def test_registration(self):
-        user_count = get_user_model().objects.all().count()
+        user_count = self.USER_MODEL.objects.all().count()
 
         # test empty payload
         self.post(self.register_url, data={}, status_code=400)
-
-        result = self.post(self.register_url, data=self.REGISTRATION_DATA, status_code=201)
+        result = self.post(self.register_url, data=self._get_registration_data(), status_code=201)
         self.assertIn('key', result.data)
-        self.assertEqual(get_user_model().objects.all().count(), user_count + 1)
+        self.assertEqual(self.USER_MODEL.objects.all().count(), user_count + 1)
 
-        new_user = get_user_model().objects.latest('id')
-        self.assertEqual(new_user.username, self.REGISTRATION_DATA['username'])
+        new_user = self.USER_MODEL.objects.latest('id')
+        username = getattr(new_user, self.USERNAME_FIELD)
+        reg_username = self._get_registration_data().get('username')
+        if not reg_username:
+            reg_username = self._get_registration_data().get('email')
+        self.assertEqual(username, reg_username)
 
         self._login()
         self._logout()
 
     def test_registration_with_invalid_password(self):
-        data = self.REGISTRATION_DATA.copy()
+        data = self._get_registration_data()
         data['password2'] = 'foobar'
 
         self.post(self.register_url, data=data, status_code=400)
@@ -334,7 +326,7 @@ class APITestCase1(TestCase, BaseAPITestCase):
         ACCOUNT_EMAIL_REQUIRED=True
     )
     def test_registration_with_email_verification(self):
-        user_count = get_user_model().objects.all().count()
+        user_count = self.USER_MODEL.objects.all().count()
         mail_count = len(mail.outbox)
 
         # test empty payload
@@ -346,18 +338,22 @@ class APITestCase1(TestCase, BaseAPITestCase):
 
         result = self.post(
             self.register_url,
-            data=self.REGISTRATION_DATA_WITH_EMAIL,
+            data=self._get_registration_data(with_email=True),
             status_code=status.HTTP_201_CREATED
         )
         self.assertNotIn('key', result.data)
-        self.assertEqual(get_user_model().objects.all().count(), user_count + 1)
+        self.assertEqual(self.USER_MODEL.objects.all().count(), user_count + 1)
         self.assertEqual(len(mail.outbox), mail_count + 1)
-        new_user = get_user_model().objects.latest('id')
-        self.assertEqual(new_user.username, self.REGISTRATION_DATA['username'])
+        new_user = self.USER_MODEL.objects.latest('id')
+        username = getattr(new_user, self.USERNAME_FIELD)
+        reg_username = self._get_registration_data().get('username')
+        if not reg_username:
+            reg_username = self._get_registration_data().get('email')
+        self.assertEqual(username, reg_username)
 
         # email is not verified yet
         payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
         self.post(

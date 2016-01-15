@@ -4,6 +4,8 @@ from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.test.client import Client, MULTIPART_CONTENT
 from django.utils.encoding import force_text
+from django.contrib.auth import get_user_model
+from django.core.exceptions import FieldDoesNotExist
 
 from rest_framework import status
 
@@ -24,6 +26,10 @@ class BaseAPITestCase(object):
         * easy request calls, f.e.: self.post(url, data), self.get(url)
         * easy status check, f.e.: self.post(url, data, status_code=200)
     """
+
+    USER_MODEL = get_user_model()
+    USERNAME_FIELD = USER_MODEL.USERNAME_FIELD
+
     def send_request(self, request_method, *args, **kwargs):
         request_func = getattr(self.client, request_method)
         status_code = None
@@ -95,9 +101,54 @@ class BaseAPITestCase(object):
         self.veirfy_email_url = reverse('rest_verify_email')
         self.fb_login_url = reverse('fb_login')
 
+    def _get_username(self, email=None):
+        username = self.USERNAME
+        if self.USERNAME_FIELD != 'username':
+            if self.USERNAME_FIELD.lower() == 'email':
+                username = email if email else self.EMAIL
+        return username
+
+    def _generate_user(self, email=None):
+        args = [self._get_username(email=email)]
+        kwargs = {'password': self.PASS}
+        add_email = False
+        if self.USERNAME_FIELD != 'username':
+            if self.USERNAME_FIELD.lower() != 'email':
+                add_email = True
+        else:
+            add_email = True
+        if add_email:
+            kwargs['email'] = email if email else self.EMAIL
+        return self.USER_MODEL.objects.create_user(*args, **kwargs)
+
+    def _get_registration_data(self, with_email=False):
+        # data without user profile
+        data = {
+            "username": self._get_username(),
+            "password1": self.PASS,
+            "password2": self.PASS
+        }
+        if with_email:
+            data['email'] = self.EMAIL
+        else:
+            # check if UserModel has an email field
+            if self.USERNAME_FIELD != 'email':
+                try:
+                    email_field = self.USER_MODEL._meta.get_field('email')
+                    data['email'] = self.EMAIL
+                except FieldDoesNotExist:
+                    pass
+            else:
+                data['email'] = self.EMAIL
+
+        if self.USERNAME_FIELD == 'email':
+            data.pop('username')
+
+        return data
+
     def _login(self):
         payload = {
-            "username": self.USERNAME,
+            "username": self._get_username(),
             "password": self.PASS
         }
         self.post(self.login_url, data=payload, status_code=status.HTTP_200_OK)

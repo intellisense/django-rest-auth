@@ -1,5 +1,4 @@
 from django.test import TestCase
-from django.contrib.auth import get_user_model
 from django.test.utils import override_settings
 from django.contrib.sites.models import Site
 
@@ -19,12 +18,6 @@ class TestSocialAuth(TestCase, BaseAPITestCase):
     USERNAME = 'person'
     PASS = 'person'
     EMAIL = "person1@world.com"
-    REGISTRATION_DATA = {
-        "username": USERNAME,
-        "password1": PASS,
-        "password2": PASS,
-        "email": EMAIL
-    }
 
     def setUp(self):
         self.init()
@@ -67,19 +60,19 @@ class TestSocialAuth(TestCase, BaseAPITestCase):
             content_type='application/json'
         )
 
-        users_count = get_user_model().objects.all().count()
+        users_count = self.USER_MODEL.objects.all().count()
         payload = {
             'access_token': 'abc123'
         }
 
         self.post(self.fb_login_url, data=payload, status_code=200)
         self.assertIn('key', self.response.json.keys())
-        self.assertEqual(get_user_model().objects.all().count(), users_count + 1)
+        self.assertEqual(self.USER_MODEL.objects.all().count(), users_count + 1)
 
         # make sure that second request will not create a new user
         self.post(self.fb_login_url, data=payload, status_code=200)
         self.assertIn('key', self.response.json.keys())
-        self.assertEqual(get_user_model().objects.all().count(), users_count + 1)
+        self.assertEqual(self.USER_MODEL.objects.all().count(), users_count + 1)
 
     @responses.activate
     @override_settings(
@@ -101,11 +94,15 @@ class TestSocialAuth(TestCase, BaseAPITestCase):
         self.post(self.register_url, data={}, status_code=400)
         self.post(
             self.register_url,
-            data=self.REGISTRATION_DATA,
+            data=self._get_registration_data(),
             status_code=201
         )
-        new_user = get_user_model().objects.latest('id')
-        self.assertEqual(new_user.username, self.REGISTRATION_DATA['username'])
+        new_user = self.USER_MODEL.objects.latest('id')
+        username = getattr(new_user, self.USERNAME_FIELD)
+        reg_username = self._get_registration_data().get('username')
+        if not reg_username:
+            reg_username = self._get_registration_data().get('email')
+        self.assertEqual(username, reg_username)
 
         # verify email
         email_confirmation = new_user.emailaddress_set.get(email=self.EMAIL)\

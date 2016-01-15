@@ -1,5 +1,6 @@
 from django.http import HttpRequest
 from django.conf import settings
+from django.contrib.auth import get_user_model
 
 try:
     from allauth.account import app_settings as allauth_settings
